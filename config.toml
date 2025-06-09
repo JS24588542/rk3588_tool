@@ -1,0 +1,49 @@
+[monitor]
+# 数据更新间隔 (秒)
+update_interval = 1.0
+
+# 历史数据点数量 (影响图表长度)
+history_length = 60
+
+# 温度警告阈值 (摄氏度)
+temp_warning_threshold = 60.0
+temp_critical_threshold = 70.0
+
+# CPU使用率警告阈值 (百分比)
+cpu_warning_threshold = 70.0
+cpu_critical_threshold = 90.0
+
+# 内存使用率警告阈值 (百分比)
+memory_warning_threshold = 80.0
+memory_critical_threshold = 95.0
+
+# NPU使用率警告阈值 (百分比)
+npu_warning_threshold = 70.0
+npu_critical_threshold = 90.0
+
+[display]
+# 图表宽度 (字符数)
+graph_width = 20
+
+# 是否显示颜色
+use_colors = true
+
+# 是否显示历史图表
+show_history_graphs = true
+
+[sensors]
+# 是否启用温度监控
+enable_temperature = true
+
+# 是否启用NPU监控 (需要sudo权限)
+enable_npu = true
+
+# 自定义温度传感器名称
+[sensors.temperature_names]
+zone0 = "SoC中心"
+zone1 = "A76_0/1(CPU4/5)"
+zone2 = "A76_2/3(CPU6/7)"
+zone3 = "A55_0/1/2/3(CPU0-3)"
+zone4 = "PD_CENTER"
+zone5 = "GPU"
+zone6 = "NPU"
