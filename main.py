@@ -4,21 +4,17 @@ RK3588 System Monitor - A Textual-based monitoring tool for RK3588 SoC
 Monitors temperature, CPU, memory, and NPU usage with real-time graphs
 """
 
-import asyncio
 import os
 import subprocess
-import time
 import configparser
 from collections import deque
-from pathlib import Path
 from typing import Dict, List, Optional
 
 import psutil
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.reactive import reactive
+from textual.containers import Container
 from textual.widget import Widget
-from textual.widgets import Header, Footer, Static, Label
+from textual.widgets import Header, Footer, Static
 
 
 class Config:
@@ -303,85 +299,108 @@ class SystemInfoWidget(Static):
         else:
             return "green"
     
+    def get_trend_indicator(self, data: List[float]) -> str:
+        """获取趋势指示器"""
+        if len(data) < 2:
+            return ""
+        
+        current = data[-1]
+        previous = data[-2]
+        
+        if current > previous + 1:
+            return "↗"
+        elif current < previous - 1:    
+            return "↘"
+        else:
+            return "→"
+    
+    def get_avg_and_trend(self, data: List[float]) -> tuple:
+        """获取平均值和趋势"""
+        if len(data) < 2:
+            return 0.0, ""
+        
+        # 最近5个数据点的平均值
+        recent_data = data[-5:]
+        avg = sum(recent_data) / len(recent_data)
+        trend = self.get_trend_indicator(data)
+        
+        return avg, trend
+
     def render_info(self):
         """渲染系统信息"""
         lines = []
-        show_graphs = self.config.get_bool('display', 'show_history_graphs')
-        graph_width = self.config.get_int('display', 'graph_width')
+        display_mode = self.config.get_str('display', 'display_mode') if self.config.config.has_option('display', 'display_mode') else 'trend'
+        show_trends = display_mode == 'trend' and self.config.get_bool('display', 'show_history_graphs')
         
         # CPU信息
         cpu_current = self.cpu_history[-1] if self.cpu_history else 0
         cpu_color = self.get_cpu_color(cpu_current)
-        lines.append(f"[bold {cpu_color}]CPU使用率: {cpu_current:.1f}%[/bold {cpu_color}]")
-        if show_graphs and len(self.cpu_history) >= 2:
-            cpu_graph = self.create_mini_graph(list(self.cpu_history), graph_width)
-            lines.append(f"CPU历史: {cpu_graph}")
+        cpu_line = f"[bold {cpu_color}]💻 CPU使用率: {cpu_current:.1f}%[/bold {cpu_color}]"
         
-        # 内存信息
+        if show_trends and len(self.cpu_history) >= 2:
+            cpu_avg, cpu_trend = self.get_avg_and_trend(list(self.cpu_history))
+            cpu_line += f"  [dim](平均: {cpu_avg:.1f}% {cpu_trend})[/dim]"
+        
+        lines.append(cpu_line)
+        
+        # 内存信息  
         memory = psutil.virtual_memory()
         memory_color = self.get_memory_color(memory.percent)
-        lines.append(f"[bold {memory_color}]内存使用: {memory.percent:.1f}% ({memory.used//1024//1024}MB/{memory.total//1024//1024}MB)[/bold {memory_color}]")
-        if show_graphs and len(self.memory_history) >= 2:
-            mem_graph = self.create_mini_graph(list(self.memory_history), graph_width)
-            lines.append(f"内存历史: {mem_graph}")
+        mem_line = f"[bold {memory_color}]🧠 内存使用: {memory.percent:.1f}% ({memory.used//1024//1024}MB/{memory.total//1024//1024}MB)[/bold {memory_color}]"
         
+        if show_trends and len(self.memory_history) >= 2:
+            mem_avg, mem_trend = self.get_avg_and_trend(list(self.memory_history))
+            mem_line += f"  [dim](平均: {mem_avg:.1f}% {mem_trend})[/dim]"
+            
+        lines.append(mem_line)
         lines.append("")
         
         # 温度信息
         if self.config.get_bool('sensors', 'enable_temperature'):
-            lines.append("[bold red]芯片温度:[/bold red]")
+            lines.append("[bold red]🌡️  芯片温度:[/bold red]")
             temperatures = self.thermal_reader.read_all_temperatures()
-            for name, temp in temperatures.items():
-                color = self.thermal_reader.get_temp_color(temp)
-                lines.append(f"  [{color}]{name}: {temp:.1f}°C[/{color}]")
-                
-                if show_graphs and len(self.temp_history[name]) >= 2:
-                    temp_graph = self.create_mini_graph(list(self.temp_history[name]), 15)
-                    lines.append(f"    历史: {temp_graph}")
+            
+            # 按重要性排序显示
+            temp_order = [
+                ("SoC中心", "🔥"),
+                ("A76_0/1(CPU4/5)", "🔴"), 
+                ("A76_2/3(CPU6/7)", "🔴"),
+                ("A55_0/1/2/3(CPU0-3)", "🟡"),
+                ("GPU", "🎮"),
+                ("NPU", "🧠"),
+                ("PD_CENTER", "⚙️")
+            ]
+            
+            for name, icon in temp_order:
+                if name in temperatures:
+                    temp = temperatures[name]
+                    color = self.thermal_reader.get_temp_color(temp)
+                    temp_line = f"  {icon} [{color}]{name}: {temp:.1f}°C[/{color}]"
+                    
+                    if show_trends and len(self.temp_history[name]) >= 2:
+                        temp_avg, temp_trend = self.get_avg_and_trend(list(self.temp_history[name]))
+                        temp_line += f"  [dim](平均: {temp_avg:.1f}°C {temp_trend})[/dim]"
+                    
+                    lines.append(temp_line)
         
         lines.append("")
         
         # NPU信息
         if self.config.get_bool('sensors', 'enable_npu'):
-            lines.append("[bold magenta]NPU使用率:[/bold magenta]")
+            lines.append("[bold magenta]🚀 NPU使用率:[/bold magenta]")
             npu_loads = self.npu_reader.read_npu_load()
+            
             for core, load in npu_loads.items():
                 color = self.npu_reader.get_npu_color(load)
-                lines.append(f"  [{color}]{core}: {load:.1f}%[/{color}]")
+                npu_line = f"  🔹 [{color}]{core}: {load:.1f}%[/{color}]"
                 
-                if show_graphs and len(self.npu_history[core]) >= 2:
-                    npu_graph = self.create_mini_graph(list(self.npu_history[core]), 15)
-                    lines.append(f"    历史: {npu_graph}")
+                if show_trends and len(self.npu_history[core]) >= 2:
+                    npu_avg, npu_trend = self.get_avg_and_trend(list(self.npu_history[core]))
+                    npu_line += f"  [dim](平均: {npu_avg:.1f}% {npu_trend})[/dim]"
+                
+                lines.append(npu_line)
         
         self.update('\n'.join(lines))
-    
-    def create_mini_graph(self, data: List[float], width: int = 20) -> str:
-        """创建小型ASCII图形"""
-        if len(data) < 2:
-            return "无数据"
-        
-        # 取最后width个数据点
-        recent_data = data[-width:] if len(data) >= width else data
-        
-        if not recent_data:
-            return "无数据"
-        
-        min_val = min(recent_data)
-        max_val = max(recent_data)
-        
-        if max_val == min_val:
-            return "━" * len(recent_data)
-        
-        # 映射到字符
-        chars = "▁▂▃▄▅▆▇█"
-        graph = ""
-        
-        for value in recent_data:
-            normalized = (value - min_val) / (max_val - min_val)
-            char_idx = min(len(chars) - 1, int(normalized * len(chars)))
-            graph += chars[char_idx]
-        
-        return graph
 
 
 class RK3588Monitor(App):
@@ -402,7 +421,8 @@ class RK3588Monitor(App):
     BINDINGS = [
         ("q", "quit", "退出"),
         ("r", "refresh", "刷新"),
-        ("c", "toggle_config", "配置"),
+        ("t", "toggle_trends", "切换趋势显示"),
+        ("s", "toggle_simple", "简洁模式"),
     ]
     
     def __init__(self, **kwargs):
@@ -436,9 +456,22 @@ class RK3588Monitor(App):
         """手动刷新"""
         self.update_system_info()
     
-    def action_toggle_config(self) -> None:
-        """显示配置信息"""
-        self.bell()  # 播放提示音
+    def action_toggle_trends(self) -> None:
+        """切换趋势显示"""
+        current = self.config.get_bool('display', 'show_history_graphs')
+        # 动态更新配置（仅在当前会话中）
+        self.config.config.set('display', 'show_history_graphs', str(not current))
+        self.update_system_info()
+        mode = "开启" if not current else "关闭"
+        self.notify(f"趋势显示已{mode}")
+    
+    def action_toggle_simple(self) -> None:
+        """切换简洁模式"""
+        current_mode = self.config.get_str('display', 'display_mode') if self.config.config.has_option('display', 'display_mode') else 'trend'
+        new_mode = 'simple' if current_mode == 'trend' else 'trend'
+        self.config.config.set('display', 'display_mode', new_mode)
+        self.update_system_info()
+        self.notify(f"切换到{'简洁' if new_mode == 'simple' else '详细'}模式")
 
 
 def main():

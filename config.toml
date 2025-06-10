@@ -22,14 +22,19 @@ npu_warning_threshold = 70.0
 npu_critical_threshold = 90.0
 
 [display]
-# 图表宽度 (字符数)
+# 图表宽度 (字符数) - 已弃用，现在使用趋势指示器
 graph_width = 20
 
 # 是否显示颜色
 use_colors = true
 
-# 是否显示历史图表
+# 是否显示历史趋势 (平均值和趋势箭头)
 show_history_graphs = true
+
+# 显示模式: "trend" 或 "simple"
+# trend: 显示平均值和趋势箭头
+# simple: 仅显示当前值
+display_mode = "trend"
 
 [sensors]
 # 是否启用温度监控
